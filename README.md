@@ -1,4 +1,4 @@
-# Brawl Draft Local v1.2
+# Brawl Draft Local v1.3
 
 A Mac-local Brawl Stars Ranked draft assistant built around the MIT-licensed
 `elixf7/brawlstars-draft-agent` statistical engine.
@@ -108,14 +108,21 @@ limited-data fallback.
 
 The choices are:
 
-- 300 — Quick
-- 500 — Fast
-- 1,000 — Balanced
-- 2,000 — Strong
-- 4,000 — Max
+- 5,000 — Quick
+- 10,000 — Fast
+- 20,000 — Balanced
+- 40,000 — Strong
+- 80,000 — Max
 
-Balanced is the default. The engine and matchup database load once at startup,
-so repeated draft queries avoid model reload time.
+Balanced (20,000 simulations) is the default. Higher budgets reduce Monte Carlo
+search noise when many brawlers remain available.
+
+Searches are deterministically seeded from the draft state, so identical drafts
+produce stable results at the same search strength.
+
+Historical win-rate, counter, and synergy lines shown on recommendation cards
+are diagnostic context rather than direct MCTS weights. Poor supported
+historical win rates are shown as warnings instead of being hidden.
 
 ## Updating the statistical model
 

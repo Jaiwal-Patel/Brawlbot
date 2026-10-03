@@ -65,12 +65,13 @@ select,input,button{font:inherit}.control,select,input[type=text],input[type=num
         <div class="field">
           <label>Search strength</label>
           <select class="control" id="budget">
-            <option value="300">Quick · 300</option>
-            <option value="500">Fast · 500</option>
-            <option value="1000" selected>Balanced · 1000</option>
-            <option value="2000">Strong · 2000</option>
-            <option value="4000">Max · 4000</option>
+            <option value="5000">Quick · 5,000</option>
+            <option value="10000">Fast · 10,000</option>
+            <option value="20000" selected>Balanced · 20,000</option>
+            <option value="40000">Strong · 40,000</option>
+            <option value="80000">Max · 80,000</option>
           </select>
+          <div class="help">More simulations reduce MCTS search noise. Balanced is recommended.</div>
         </div>
       </div>
 
@@ -195,7 +196,7 @@ function renderRecommendations(data){
     return `<div class="rec ${i===0?"rank1":""} ${limited?"limited":""}" data-b="${r.brawler}">
       <div class="rank">#${r.rank} · click to choose${limited?" · limited data":""}</div>
       <div class="name">${title(r.brawler)}</div>
-      <div class="prob">${(r.estimated_win_prob*100).toFixed(1)}% <small>est. draft win</small></div>
+      <div class="prob">${(r.estimated_win_prob*100).toFixed(1)}% <small>model estimate</small></div>
       <div class="reason">${reasons}</div>
     </div>`;
   }).join("");

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import mimetypes
@@ -211,20 +212,34 @@ def candidate_reasons(
             (2.0, "Limited-data fallback: this brawler is newer than the trained snapshot")
         )
 
+    # Historical evidence shown here is diagnostic context.
+    # Bad historical performance should not be hidden from the user.
     stat = DB.brawler_lookup(brawler, mode, map_name, tier)
     if stat and stat.get("n", 0) >= 10:
         wr = float(stat["win_rate"])
         strength = abs(wr - 0.5)
-        if wr >= 0.5:
-            level = int(stat.get("level", 3))
-            if level == 0:
-                context = "on this map"
-            elif level <= 2:
-                context = f"in {MODE_LABELS.get(mode, mode)}"
-            else:
-                context = "overall"
+        level = int(stat.get("level", 3))
+
+        if level == 0:
+            context = "on this map"
+        elif level <= 2:
+            context = f"in {MODE_LABELS.get(mode, mode)}"
+        else:
+            context = "overall"
+
+        if wr < 0.45:
             candidates.append(
-                (0.35 + strength, f"{wr:.0%} historical win rate {context}")
+                (
+                    1.15 + strength,
+                    f"Warning: {wr:.0%} historical win rate {context}",
+                )
+            )
+        else:
+            candidates.append(
+                (
+                    0.55 + strength,
+                    f"Historical win rate: {wr:.0%} {context}",
+                )
             )
 
     for opp in opp_picks:
@@ -233,7 +248,7 @@ def candidate_reasons(
             wr = float(rec["win_rate"])
             if wr >= 0.52:
                 candidates.append(
-                    (0.7 + (wr - 0.5), f"Positive historical matchup into {opp.title()} ({wr:.0%})")
+                    (0.7 + (wr - 0.5), f"Historical matchup into {opp.title()}: {wr:.0%}")
                 )
 
     for mate in my_picks:
@@ -242,7 +257,7 @@ def candidate_reasons(
             delta = float(rec.get("synergy_delta", 0.0))
             if delta > 0.0:
                 candidates.append(
-                    (0.55 + delta, f"Positive synergy signal with {mate.title()} (+{delta:.1%})")
+                    (0.55 + delta, f"Historical synergy with {mate.title()}: +{delta:.1%}")
                 )
 
     rel = float(search_pick.get("relative_visit_fraction", 0.0) or 0.0)
@@ -273,12 +288,12 @@ def make_recommendation(payload: dict) -> dict:
     map_name = str(payload.get("map", "")).strip()
     personal_slot = int(payload.get("personal_slot", 0))
     skill_percentile = float(payload.get("skill_percentile", 75))
-    n_simulations = int(payload.get("n_simulations", 1000))
+    n_simulations = int(payload.get("n_simulations", 20000))
 
     if personal_slot not in range(1, 7):
         raise ValueError("personal_slot must be from 1 to 6.")
 
-    valid_budgets = {300, 500, 1000, 2000, 4000}
+    valid_budgets = {5000, 10000, 20000, 40000, 80000}
     if n_simulations not in valid_budgets:
         raise ValueError(f"n_simulations must be one of {sorted(valid_budgets)}.")
 
@@ -341,6 +356,27 @@ def make_recommendation(payload: dict) -> dict:
     my_picks, opp_picks, is_first_pick = team_lists(slots, personal_slot)
     skill_ns = pct_to_skill(skill_percentile)
 
+    # Make identical draft states reproducible.
+    # n_simulations is intentionally excluded so larger searches extend
+    # the same initial random sequence.
+    seed_material = json.dumps(
+        {
+            "mode": mode,
+            "map": map_name,
+            "personal_slot": personal_slot,
+            "skill_percentile": skill_percentile,
+            "bans": sorted(bans),
+            "slots": slots,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+    search_seed = int.from_bytes(
+        hashlib.blake2b(seed_material, digest_size=8).digest(),
+        "little",
+    )
+
     with SEARCH_LOCK:
         result = recommend(
             my_picks=my_picks,
@@ -355,7 +391,7 @@ def make_recommendation(payload: dict) -> dict:
             min_counter_games=10,
             evaluator=EVALUATOR,
             db=DB,
-            rng=np.random.default_rng(),
+            rng=np.random.default_rng(search_seed),
         )
 
     recs = []
@@ -394,7 +430,7 @@ def make_recommendation(payload: dict) -> dict:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "BrawlDraftLocal/1.2"
+    server_version = "BrawlDraftLocal/1.3"
 
     def log_message(self, fmt: str, *args) -> None:
         print("[local]", fmt % args)
