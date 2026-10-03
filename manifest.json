@@ -1,0 +1,19 @@
+{
+  "project": "BrawlDraftLocal",
+  "version": "1.2",
+  "files": [
+    "README.md",
+    "THIRD_PARTY_NOTICE.md",
+    "app.py",
+    "roster_support.py",
+    "update_roster.py",
+    "update_roster.command",
+    "ranked_maps.json",
+    "bootstrap.py",
+    "manifest.json",
+    "run.command",
+    "setup.command",
+    "smoke_test.py",
+    "static/index.html"
+  ]
+}

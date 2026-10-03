@@ -1,0 +1,47 @@
+{
+  "scope": "current_ranked_pool",
+  "season": 49,
+  "featured_mode": "hotZone",
+  "verified_on": "2026-10-03",
+  "source": "https://brawlzone.net/ranked",
+  "map_modes": {
+    "bounty": [
+      "Dry Season",
+      "Hideout",
+      "Layer Cake",
+      "Shooting Star"
+    ],
+    "brawlBall": [
+      "Center Stage",
+      "Pinball Dreams",
+      "Sneaky Fields",
+      "Triple Dribble"
+    ],
+    "gemGrab": [
+      "Double Swoosh",
+      "Gem Fort",
+      "Hard Rock Mine",
+      "Undermine"
+    ],
+    "heist": [
+      "Bridge Too Far",
+      "Hot Potato",
+      "Kaboom Canyon",
+      "Safe Zone"
+    ],
+    "hotZone": [
+      "Dueling Beetles",
+      "In the Liminal",
+      "Open Business",
+      "Quick Travel",
+      "Parallel Plays",
+      "Ring of Fire"
+    ],
+    "knockout": [
+      "Belle's Rock",
+      "Flaring Phoenix",
+      "New Horizons",
+      "Out in the Open"
+    ]
+  }
+}

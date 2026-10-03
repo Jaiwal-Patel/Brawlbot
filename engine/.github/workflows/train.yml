@@ -1,0 +1,221 @@
+name: Train
+
+# Fridays, after the ETL pipeline's Thursday pull has landed. The
+# win-probability model is retrained every week because more data still helps —
+# there is no plateau at a million games — and it trains in about twenty
+# seconds. Self-play runs twice a season instead: it plateaus after one
+# iteration, so weekly runs would spend time re-learning the same thing.
+#
+# One extra run per season, on the Monday after its Thursday reset. The
+# pipeline crawls daily through a season's opening, so by Monday there are four
+# days of the new season to train on -- worth publishing, and a week earlier
+# than waiting for Friday. Brawl Stars Atlas deploys the same afternoon and
+# expects the model to be there.
+#
+# This used to run every day of the first week. Six of those seven were
+# superseded within a day while the season was still doubling overnight, so
+# they cost a training run each to publish something nothing ever read.
+#
+# The Monday entry fires year-round; `decide` turns it away unless it is the
+# Monday after a reset, and again unless the newest season has actually grown
+# enough to beat the baselines. Day 4 keeps it inside week 1, so it never lands
+# on a self-play week.
+#
+# 05:17 rather than 07:00 so the hour still leaves the chain in order on the
+# day it fires: Atlas deploys at 13:17 and the pipeline crawls at 17:17, so a
+# crawl never lands between a model and the site built from it.
+on:
+  schedule:
+    - cron: "0 7 * * 5"
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+    inputs:
+      force_selfplay:
+        description: "Run self-play regardless of the week"
+        type: boolean
+        default: false
+      publish:
+        description: "Publish the model payload"
+        type: boolean
+        default: true
+      min_season_rows:
+        description: "Sets a season needs before it is trained; blank uses the default"
+        required: false
+
+concurrency:
+  group: bsdraft-train
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # only for the keepalive commit at the end of the train job
+  pages: write
+  id-token: write
+
+env:
+  CONFIG: runs/weekly.toml
+  DATASET_REPO: EliF77/brawlstars-ranked
+
+jobs:
+  # Cheap, so the expensive job never starts on a day with nothing new to
+  # train. Only the daily entry is conditional: Friday is the regular schedule
+  # and a dispatch is somebody asking for it on purpose.
+  decide:
+    runs-on: ubuntu-latest
+    outputs:
+      train: ${{ steps.check.outputs.train }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - id: check
+        env:
+          BSDRAFT_MIN_SEASON_ROWS: ${{ inputs.min_season_rows }}
+        # Fail loudly rather than emitting nothing: an empty output reads as
+        # "do not train", which is the safe answer but an invisible one.
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event.schedule }}" != "17 5 * * 1" ]; then
+            echo "Regular run; training."
+            echo "train=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          opening=$(uv run python -c \
+            "from bsdraft.schedule import is_opening_run_day; print(str(is_opening_run_day()).lower())")
+          echo "Opening run day: $opening"
+          if [ "$opening" != "true" ]; then
+            echo "Not the Monday after a reset; the weekly run covers it."
+            echo "train=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # `ready` is true once the newest published season is worth training
+          # on its own, rather than falling back to the season before it.
+          uv run python -m bsdraft.cli.weekly_config --check > /tmp/check.env
+          cat /tmp/check.env
+          ready=$(grep '^ready=' /tmp/check.env | cut -d= -f2)
+          echo "train=${ready}" >> "$GITHUB_OUTPUT"
+
+  train:
+    needs: decide
+    if: needs.decide.outputs.train == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      # Newest published season, unless it is still too thin to beat the
+      # baselines -- a season's first crawl lands hours after the reset and
+      # yields a few thousand sets. Lower the floor by hand to switch to a new
+      # season early, once an off-schedule crawl has filled it out.
+      - name: Select a season to train and pin this run
+        env:
+          BSDRAFT_MIN_SEASON_ROWS: ${{ inputs.min_season_rows }}
+        run: uv run python -m bsdraft.cli.weekly_config
+
+      # Which season, and how far into it — self-play is worth running only
+      # once there is enough new data to be worth distilling.
+      - name: Where are we in the season
+        run: |
+          uv run python - <<'PY' >> "$GITHUB_ENV"
+          from bsdraft.schedule import should_run_selfplay, weeks_into_season
+          print(f"SEASON_WEEK={weeks_into_season()}")
+          print(f"RUN_SELFPLAY={'true' if should_run_selfplay() else 'false'}")
+          PY
+          uv run python -c "from bsdraft.schedule import *; print(f'season started {season_start(__import__(\"datetime\").date.today())}, week {weeks_into_season()}')"
+
+      # Runners start empty, so without this each run would record itself into
+      # a fresh registry and throw the history away with the job.
+      - name: Restore the run registry
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          uv run bsdraft-registry pull --repo-id "$DATASET_REPO" \
+            --path runs/registry.db --allow-missing
+
+      - name: Train the win-probability model
+        run: uv run bsdraft-train fm -c "$CONFIG"
+
+      # The gate. Below roughly 100,000 games the model scores worse than
+      # counting character-and-map win rates, so early in a season it can
+      # genuinely be worse than a lookup table. Nothing ships unless it wins.
+      - name: Check it beats the baselines
+        run: uv run bsdraft-eval -c "$CONFIG" --require-beat-baselines
+
+      - name: Self-play
+        if: env.RUN_SELFPLAY == 'true' || inputs.force_selfplay
+        # Same config as the model above, so self-play loads the evaluator
+        # that was just trained rather than looking in another run directory.
+        run: uv run bsdraft-train selfplay -c "$CONFIG"
+
+      # Observability, not the job: a missing HF_TOKEN should not fail training.
+      - name: Store the run registry
+        if: always() && hashFiles('runs/registry.db') != ''
+        continue-on-error: true
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: uv run bsdraft-registry push --repo-id "$DATASET_REPO" --path runs/registry.db
+
+      # data.json is the model, and Brawl Stars Atlas reads it straight from
+      # Pages. index.html beside it is a landing page pointing at the atlas --
+      # the interactive dashboard that used to be built here lives there now.
+      - name: Build the model payload
+        run: uv run bsdraft-publish -c "$CONFIG" --out-dir site
+
+      - name: Package the payload
+        if: github.event_name == 'schedule' || inputs.publish
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      # GitHub switches off scheduled workflows in a public repository after 60
+      # days with no repository activity. A workflow *run* is not activity --
+      # only a commit is -- so training that is working perfectly turns itself
+      # off two months after the last push. This leaves an empty marker commit
+      # once the repository has been quiet long enough to be at risk, well
+      # inside the 60 days, and does nothing at all while anyone is working on
+      # it. Pushes made with GITHUB_TOKEN do not start further workflow runs,
+      # so this cannot loop.
+      # Never fail the run over this: training is the job, and the next
+      # scheduled run is another attempt. Firing at 45 days leaves two more
+      # tries before the 60-day limit, so one miss costs nothing.
+      - name: Keep the schedule alive
+        if: always() && github.event_name == 'schedule'
+        continue-on-error: true
+        run: |
+          quiet_days=$(( ( $(date +%s) - $(git log -1 --format=%ct) ) / 86400 ))
+          echo "Last commit was ${quiet_days} day(s) ago."
+          if [ "$quiet_days" -lt 45 ]; then
+            echo "Still well inside the window; nothing to do."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty \
+            -m "Keep scheduled workflows enabled (quiet for ${quiet_days} days)"
+          git push
+
+      - name: Keep the run summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-${{ github.run_id }}
+          path: |
+            runs/**/fm_manifest.json
+            runs/**/evaluation.json
+          if-no-files-found: ignore
+          retention-days: 90
+
+  deploy:
+    needs: train
+    if: needs.train.result == 'success' && (github.event_name == 'schedule' || inputs.publish)
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

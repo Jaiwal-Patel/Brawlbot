@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Brawl Draft Local</title>
+<style>
+:root{
+  --bg:#0b0d12;--panel:#121620;--panel2:#171c27;--text:#f5f7fb;--muted:#96a0b3;
+  --line:#252c3a;--accent:#8d7cff;--good:#6ee7a8;--warn:#ffcf66;--bad:#ff7a90;
+}
+*{box-sizing:border-box} body{margin:0;background:radial-gradient(circle at 20% -10%,#20213f 0,#0b0d12 34%);color:var(--text);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.shell{max-width:1180px;margin:0 auto;padding:28px 20px 60px}.top{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:22px}
+h1{font-size:30px;margin:0 0 5px;letter-spacing:-.6px}.sub{color:var(--muted);margin:0}.badge{border:1px solid var(--line);background:#10141d;padding:8px 11px;border-radius:999px;color:var(--muted);white-space:nowrap}
+.grid{display:grid;grid-template-columns:370px 1fr;gap:18px}.panel{background:rgba(18,22,32,.94);border:1px solid var(--line);border-radius:18px;padding:18px;box-shadow:0 14px 40px rgba(0,0,0,.2)}
+h2{font-size:17px;margin:0 0 14px}.field{margin:0 0 14px}.field label{display:flex;justify-content:space-between;color:#c7cedb;font-size:13px;margin-bottom:7px}
+select,input,button{font:inherit}.control,select,input[type=text],input[type=number]{width:100%;border:1px solid #303849;background:#0e121a;color:var(--text);border-radius:11px;padding:10px 11px;outline:none}
+.control:focus,select:focus,input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(141,124,255,.12)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}.three{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.banrow{display:flex;gap:8px}.banrow input{flex:1}.btn{border:1px solid #333b4c;background:#1a2030;color:white;border-radius:11px;padding:9px 12px;cursor:pointer}.btn:hover{background:#232a3b}.btn.primary{background:var(--accent);border-color:transparent;color:#fff;font-weight:700}.btn.ghost{background:transparent}
+.chips{display:flex;flex-wrap:wrap;gap:7px;min-height:34px;margin-top:10px}.chip{display:flex;align-items:center;gap:6px;background:#222838;border:1px solid #31394a;padding:6px 8px;border-radius:999px;font-size:12px}.chip button{border:0;background:transparent;color:#aeb7c8;cursor:pointer;padding:0 2px}
+.help{font-size:12px;color:var(--muted);margin-top:6px}.statusline{margin-top:11px;font-size:12px;color:var(--muted)}
+.draft-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:13px}.actions{display:flex;gap:7px}
+.slots{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}.slot{min-height:112px;border:1px solid var(--line);background:#0f131c;border-radius:13px;padding:10px;position:relative}.slot.current{border-color:var(--accent);box-shadow:0 0 0 2px rgba(141,124,255,.13)}.slot.mine{background:linear-gradient(180deg,rgba(141,124,255,.11),#0f131c)}.slot.personal:after{content:"YOUR PICK";position:absolute;right:7px;top:7px;font-size:8px;letter-spacing:.8px;color:#c4bbff}
+.slotnum{font-size:11px;color:var(--muted)}.slotteam{font-size:10px;color:#77839a;text-transform:uppercase;letter-spacing:.7px;margin:4px 0 13px}.slotpick{font-weight:750;font-size:14px;word-break:break-word}.empty{color:#4f596d;font-weight:500}
+.entry{margin-top:14px;padding:13px;border-radius:13px;background:#0e121a;border:1px solid var(--line);display:grid;grid-template-columns:1fr auto;gap:8px;align-items:end}.entry.hidden{display:none}.entry .label{grid-column:1/-1;color:#c7cedb;font-size:12px}
+.recs{margin-top:18px}.rec-title{display:flex;justify-content:space-between;align-items:end;margin-bottom:10px}.rec-title h2{margin:0}.latency{font-size:12px;color:var(--muted)}
+.recgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.rec{border:1px solid var(--line);border-radius:15px;background:#0e121a;padding:14px;cursor:pointer;transition:.15s}.rec:hover{transform:translateY(-2px);border-color:#4a5267}.rec.rank1{border-color:rgba(110,231,168,.55);background:linear-gradient(180deg,rgba(110,231,168,.08),#0e121a)}.rec.limited{border-style:dashed;border-color:rgba(255,207,102,.55)}
+.rank{font-size:11px;color:var(--muted)}.name{font-size:19px;font-weight:800;margin:4px 0 9px}.prob{font-size:25px;font-weight:800;letter-spacing:-.5px}.prob small{font-size:11px;color:var(--muted);font-weight:500}.reason{margin-top:9px;color:#bcc4d2;font-size:12px}.reason div{margin-top:4px}
+.message{margin-top:18px;padding:20px;border:1px dashed #303849;border-radius:15px;color:var(--muted);text-align:center}.error{margin-top:12px;color:#ff9baa;font-size:12px}
+.footer{margin-top:18px;color:#6f798c;font-size:11px;text-align:center}
+@media(max-width:900px){.grid{grid-template-columns:1fr}.slots{grid-template-columns:repeat(3,1fr)}.recgrid{grid-template-columns:1fr}.top{display:block}.badge{display:inline-block;margin-top:10px}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="top">
+    <div><h1>Brawl Draft Local</h1><p class="sub">Local statistical draft search · three alternatives · no cloud call during a draft</p></div>
+    <div class="badge" id="datasetBadge">Loading model…</div>
+  </div>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>Match setup</h2>
+      <div class="field">
+        <label>Mode</label>
+        <select class="control" id="mode"></select>
+      </div>
+      <div class="field">
+        <label>Map</label>
+        <select class="control" id="map"></select>
+        <div class="help" id="mapSupport"></div>
+        <div class="help" id="dataSupport"></div>
+      </div>
+
+      <div class="two">
+        <div class="field">
+          <label>Your pick slot <span id="slotSide"></span></label>
+          <select class="control" id="personalSlot">
+            <option value="1">Pick 1</option><option value="2">Pick 2</option>
+            <option value="3">Pick 3</option><option value="4">Pick 4</option>
+            <option value="5">Pick 5</option><option value="6">Pick 6</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Search strength</label>
+          <select class="control" id="budget">
+            <option value="300">Quick · 300</option>
+            <option value="500">Fast · 500</option>
+            <option value="1000" selected>Balanced · 1000</option>
+            <option value="2000">Strong · 2000</option>
+            <option value="4000">Max · 4000</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Skill percentile <span id="skillLabel">75%</span></label>
+        <input style="width:100%" id="skill" type="range" min="10" max="95" step="5" value="75">
+        <div class="help">Relative to the engine's ranked-match data. Leave at 75% if you don't want to tune this.</div>
+      </div>
+
+      <div class="field">
+        <label>Bans <span id="banCount">0 / 3–6</span></label>
+        <div class="banrow">
+          <input class="control" id="banInput" type="text" list="brawlers" placeholder="Search brawler">
+          <button class="btn" id="addBan">Add</button>
+        </div>
+        <div class="chips" id="banChips"></div>
+        <div class="help">Minimum 3, maximum 6. Banned brawlers are excluded from every search.</div>
+      </div>
+      <div class="error" id="setupError"></div>
+    </section>
+
+    <section class="panel">
+      <div class="draft-head">
+        <div><h2 style="margin:0">Live draft</h2><div class="statusline" id="draftStatus">Choose the match setup and bans.</div></div>
+        <div class="actions">
+          <button class="btn ghost" id="undo">Undo</button>
+          <button class="btn ghost" id="reset">Reset picks</button>
+        </div>
+      </div>
+
+      <div class="slots" id="slots"></div>
+
+      <div class="entry hidden" id="entry">
+        <div class="label" id="entryLabel">Enter pick</div>
+        <input class="control" id="pickInput" type="text" list="brawlers" placeholder="Brawler name">
+        <button class="btn primary" id="addPick">Record pick</button>
+      </div>
+
+      <div class="recs" id="recs"></div>
+    </section>
+  </div>
+
+  <div class="footer">Not affiliated with or endorsed by Supercell. Brawl Stars is a trademark of Supercell Oy.</div>
+</div>
+
+<datalist id="brawlers"></datalist>
+
+<script>
+const S={meta:null,bans:[],slots:[null,null,null,null,null,null],busy:false,lastSig:""};
+const $=id=>document.getElementById(id);
+const firstSlots=new Set([1,4,5]);
+
+function title(s){return s.toLowerCase().replace(/\b\w/g,c=>c.toUpperCase())}
+const MODE_LABELS={bounty:"Bounty",brawlBall:"Brawl Ball",gemGrab:"Gem Grab",heist:"Heist",hotZone:"Hot Zone",knockout:"Knockout"};
+function modeTitle(s){return MODE_LABELS[s]||s}
+function personalSlot(){return +$("personalSlot").value}
+function userIsFirst(){return firstSlots.has(personalSlot())}
+function slotIsMine(n){return userIsFirst()?firstSlots.has(n):!firstSlots.has(n)}
+function currentSlot(){const i=S.slots.findIndex(x=>!x);return i<0?7:i+1}
+function occupied(){return new Set([...S.bans,...S.slots.filter(Boolean)])}
+function validBrawler(name){return S.meta.vocab.includes(name.trim().toUpperCase())}
+
+function renderMapSupport(){
+  const map=$("map").value;
+  if(!map||!S.meta)return;
+  const approximate=(S.meta.approximate_maps||[]).includes(map);
+  if(approximate){
+    $("mapSupport").textContent="Current Ranked map · not present in this training snapshot, so recommendations use the mode-level fallback until map-specific data is available.";
+  }else{
+    $("mapSupport").textContent="Current Ranked map · map-specific model data available.";
+  }
+}
+function populateMaps(){
+  const mode=$("mode").value;
+  const maps=S.meta.map_modes[mode]||[];
+  $("map").innerHTML=maps.map(x=>`<option>${x}</option>`).join("");
+  renderMapSupport();
+}
+function renderBans(){
+  $("banCount").textContent=`${S.bans.length} / 3–6`;
+  $("banChips").innerHTML=S.bans.map((b,i)=>`<span class="chip">${title(b)} <button data-i="${i}">×</button></span>`).join("");
+  $("banChips").querySelectorAll("button").forEach(btn=>btn.onclick=()=>{S.bans.splice(+btn.dataset.i,1);render();});
+}
+function renderSlots(){
+  const cur=currentSlot(), mineFirst=userIsFirst();
+  $("slotSide").textContent=mineFirst?"· first-pick team":"· second-pick team";
+  $("slots").innerHTML=S.slots.map((b,i)=>{
+    const n=i+1, mine=slotIsMine(n), personal=n===personalSlot();
+    const classes=["slot",mine?"mine":"",personal?"personal":"",n===cur?"current":""].join(" ");
+    return `<div class="${classes}"><div class="slotnum">PICK ${n}</div><div class="slotteam">${mine?"your team":"opponent"}</div><div class="slotpick ${b?"":"empty"}">${b?title(b):"—"}</div></div>`;
+  }).join("");
+}
+function renderEntry(){
+  const cur=currentSlot();
+  const show=cur<=6 && cur!==personalSlot();
+  $("entry").classList.toggle("hidden",!show);
+  if(show){
+    $("entryLabel").textContent=`Record pick ${cur} · ${slotIsMine(cur)?"your teammate":"opponent"}`;
+    $("pickInput").value="";
+  }
+}
+function payload(){
+  return {
+    mode:$("mode").value,map:$("map").value,personal_slot:personalSlot(),
+    skill_percentile:+$("skill").value,n_simulations:+$("budget").value,
+    bans:S.bans,slots:S.slots
+  };
+}
+function signature(){return JSON.stringify(payload())}
+function showMessage(text){
+  $("recs").innerHTML=`<div class="message">${text}</div>`;
+}
+function renderRecommendations(data){
+  if(data.status!=="recommend"){
+    showMessage(data.message||"Continue the draft.");
+    return;
+  }
+  const cards=(data.recommendations||[]).map((r,i)=>{
+    const reasons=(r.reasons||[]).map(x=>`<div>• ${x}</div>`).join("");
+    const delta=(r.win_prob_delta||0);
+    const limited=r.data_support==="roster_fallback";
+    return `<div class="rec ${i===0?"rank1":""} ${limited?"limited":""}" data-b="${r.brawler}">
+      <div class="rank">#${r.rank} · click to choose${limited?" · limited data":""}</div>
+      <div class="name">${title(r.brawler)}</div>
+      <div class="prob">${(r.estimated_win_prob*100).toFixed(1)}% <small>est. draft win</small></div>
+      <div class="reason">${reasons}</div>
+    </div>`;
+  }).join("");
+  const support=data.map_support==="mode_fallback"?" · mode-level map fallback":"";
+  $("recs").innerHTML=`<div class="rec-title"><h2>Your 3 alternatives</h2><div class="latency">${data.elapsed_sec.toFixed(2)}s · ${data.simulations.toLocaleString()} simulations${support}</div></div><div class="recgrid">${cards}</div>`;
+  $("recs").querySelectorAll(".rec").forEach(el=>el.onclick=()=>{
+    S.slots[personalSlot()-1]=el.dataset.b;
+    render();
+  });
+}
+async function recommendIfNeeded(){
+  $("setupError").textContent="";
+  const cur=currentSlot();
+  if(S.bans.length<3){showMessage(`Add ${3-S.bans.length} more ban${3-S.bans.length===1?"":"s"} to start.`);return}
+  if(cur===7){showMessage("Draft complete.");return}
+  if(cur<personalSlot()){showMessage(`Record pick ${cur}. Your pick is slot ${personalSlot()}.`);return}
+  if(cur>personalSlot()){showMessage("Your pick is locked in. You can keep recording the remaining picks.");return}
+  if(S.busy){return}
+  const sig=signature();
+  if(sig===S.lastSig)return;
+  S.lastSig=sig; S.busy=true;
+  $("draftStatus").textContent="Searching future draft responses…";
+  $("recs").innerHTML='<div class="message">Calculating three picks locally…</div>';
+  try{
+    const r=await fetch("/api/recommend",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload())});
+    const data=await r.json();
+    if(!r.ok)throw new Error(data.error||data.detail||"Recommendation failed");
+    renderRecommendations(data);
+    $("draftStatus").textContent=data.status==="recommend"?`Your turn · pick ${personalSlot()}`:data.message;
+  }catch(e){
+    $("setupError").textContent=e.message;
+    showMessage("Fix the setup issue shown on the left.");
+  }finally{S.busy=false}
+}
+function render(){
+  renderBans();renderSlots();renderEntry();
+  const cur=currentSlot();
+  $("draftStatus").textContent=cur<=6?`Next: pick ${cur} · ${slotIsMine(cur)?"your team":"opponent"}`:"Draft complete";
+  recommendIfNeeded();
+}
+function addBan(){
+  const b=$("banInput").value.trim().toUpperCase();
+  $("setupError").textContent="";
+  if(!validBrawler(b)){ $("setupError").textContent="Choose a brawler from the list."; return}
+  if(S.bans.length>=6){$("setupError").textContent="Maximum 6 bans.";return}
+  if(occupied().has(b)){$("setupError").textContent="That brawler is already banned or picked.";return}
+  S.bans.push(b);$("banInput").value="";S.lastSig="";render();
+}
+function addPick(){
+  const b=$("pickInput").value.trim().toUpperCase(),cur=currentSlot();
+  $("setupError").textContent="";
+  if(cur>6)return;
+  if(!validBrawler(b)){$("setupError").textContent="Choose a brawler from the list.";return}
+  if(occupied().has(b)){$("setupError").textContent="That brawler is already banned or picked.";return}
+  S.slots[cur-1]=b;S.lastSig="";render();
+}
+
+async function init(){
+  const r=await fetch("/api/meta");S.meta=await r.json();
+  const mapCount=Object.values(S.meta.map_modes||{}).reduce((n,a)=>n+a.length,0);
+  const rosterCount=S.meta.roster?.count||S.meta.vocab.length;
+  $("datasetBadge").textContent=`${(S.meta.dataset_rows||0).toLocaleString()} match rows · ${rosterCount} brawlers · ${mapCount} maps · local`;
+  const fallbackCount=(S.meta.approximate_brawlers||[]).length;
+  const modelName=S.meta.model_snapshot||"trained snapshot";
+  const rosterStamp=S.meta.roster?.updated_at?` · roster ${S.meta.roster.updated_at.slice(0,10)}`:"";
+  $("dataSupport").textContent=fallbackCount
+    ? `Model ${modelName}${rosterStamp} · ${fallbackCount} newer brawler${fallbackCount===1?"":"s"} use a neutral roster-average fallback until the model is refreshed.`
+    : `Model ${modelName}${rosterStamp} · all current roster entries are represented in the trained model.`;
+  $("mode").innerHTML=Object.keys(S.meta.map_modes).map(x=>`<option value="${x}">${modeTitle(x)}</option>`).join("");
+  populateMaps();
+  $("brawlers").innerHTML=S.meta.vocab.map(x=>`<option value="${title(x)}"></option>`).join("");
+  $("addBan").onclick=addBan;$("addPick").onclick=addPick;
+  $("banInput").onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();addBan()}};
+  $("pickInput").onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();addPick()}};
+  $("mode").onchange=()=>{populateMaps();S.lastSig="";render()};
+  $("map").onchange=()=>{renderMapSupport();S.lastSig="";render()};
+  $("personalSlot").onchange=()=>{S.slots=[null,null,null,null,null,null];S.lastSig="";render()};
+  $("budget").onchange=()=>{S.lastSig="";render()};
+  $("skill").oninput=()=>{$("skillLabel").textContent=$("skill").value+"%";};
+  $("skill").onchange=()=>{S.lastSig="";render()};
+  $("undo").onclick=()=>{for(let i=5;i>=0;i--){if(S.slots[i]){S.slots[i]=null;break}}S.lastSig="";render()};
+  $("reset").onclick=()=>{S.slots=[null,null,null,null,null,null];S.lastSig="";render()};
+  render();
+}
+init().catch(e=>{$("setupError").textContent=e.message});
+</script>
+</body>
+</html>

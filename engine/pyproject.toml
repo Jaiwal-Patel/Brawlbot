@@ -1,0 +1,59 @@
+[project]
+name = "logr-mcts"
+version = "0.1.0"
+description = "Draft recommendation for Brawl Stars ranked: a calibrated factorization-machine evaluator inside Monte Carlo tree search, trained by self-play"
+requires-python = ">=3.13"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Eli Fried", email = "elixf7@gmail.com" }]
+keywords = ["machine-learning", "monte-carlo-tree-search", "self-play", "factorization-machines", "brawl-stars"]
+dependencies = [
+    "huggingface-hub>=1.30.0",
+    "ipykernel>=7.2.0",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.8",
+    "numpy>=2.4.3",
+    "pandas>=3.0.1",
+    "pyarrow>=25.0.1",
+    "scikit-learn>=1.8.0",
+    "scipy>=1.17.1",
+    "torch>=2.10.0",
+]
+
+[project.scripts]
+bsdraft-data = "bsdraft.cli.data:main"
+bsdraft-train = "bsdraft.cli.train:main"
+bsdraft-runs = "bsdraft.cli.runs:main"
+bsdraft-eval = "bsdraft.cli.evaluate:main"
+bsdraft-publish = "bsdraft.cli.publish:main"
+bsdraft-registry = "bsdraft.cli.registry:main"
+
+[project.urls]
+Repository = "https://github.com/elixf7/brawlstars-draft-agent"
+Dataset = "https://huggingface.co/datasets/EliF77/brawlstars-ranked"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bsdraft"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
