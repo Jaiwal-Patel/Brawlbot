@@ -164,15 +164,30 @@ function renderSlots(){
     return `<div class="${classes}"><div class="slotnum">PICK ${n}</div><div class="slotteam">${mine?"your team":"opponent"}</div><div class="slotpick ${b?"":"empty"}">${b?title(b):"—"}</div></div>`;
   }).join("");
 }
+
 function renderEntry(){
-  const cur=currentSlot();
-  const show=cur<=6 && cur!==personalSlot();
-  $("entry").classList.toggle("hidden",!show);
+  const cur = currentSlot();
+
+  const show = cur <= 6 && S.bans.length >= 3;
+
+  $("entry").classList.toggle("hidden", !show);
+
   if(show){
-    $("entryLabel").textContent=`Record pick ${cur} · ${slotIsMine(cur)?"your teammate":"opponent"}`;
-    $("pickInput").value="";
+    let who;
+
+    if(cur === personalSlot()){
+      who = "your pick";
+    }else if(slotIsMine(cur)){
+      who = "teammate";
+    }else{
+      who = "opponent";
+    }
+
+    $("entryLabel").textContent =
+      `Record pick ${cur} · ${who}`;
   }
 }
+
 function payload(){
   return {
     mode:$("mode").value,map:$("map").value,personal_slot:personalSlot(),
@@ -184,59 +199,314 @@ function signature(){return JSON.stringify(payload())}
 function showMessage(text){
   $("recs").innerHTML=`<div class="message">${text}</div>`;
 }
+
 function renderRecommendations(data){
-  if(data.status!=="recommend"){
-    showMessage(data.message||"Continue the draft.");
-    return;
+
+  const banCards = (data.ban_recommendations || []);
+
+  let html = "";
+
+  // --------------------------------------------------------
+  // BAN SUGGESTIONS
+  // --------------------------------------------------------
+
+  if(banCards.length && S.slots.every(x=>!x)){
+    const cards = banCards.map((r,i)=>`
+      <div class="rec ${i===0?"rank1":""}"
+           data-ban="${r.brawler}">
+        <div class="rank">
+          #${i+1} ban suggestion · click to add
+        </div>
+        <div class="name">${title(r.brawler)}</div>
+        <div class="reason">
+          ${r.reason}
+        </div>
+      </div>
+    `).join("");
+
+    html += `
+      <div class="rec-title">
+        <h2>Suggested bans</h2>
+      </div>
+      <div class="recgrid">${cards}</div>
+      <div class="help">
+        Historical map/meta shortlist, not a fully optimized
+        ban search. Avoid banning brawlers your team wants to play.
+      </div>
+    `;
   }
-  const cards=(data.recommendations||[]).map((r,i)=>{
-    const reasons=(r.reasons||[]).map(x=>`<div>• ${x}</div>`).join("");
-    const delta=(r.win_prob_delta||0);
-    const limited=r.data_support==="roster_fallback";
-    return `<div class="rec ${i===0?"rank1":""} ${limited?"limited":""}" data-b="${r.brawler}">
-      <div class="rank">#${r.rank} · click to choose${limited?" · limited data":""}</div>
-      <div class="name">${title(r.brawler)}</div>
-      <div class="prob">${(r.estimated_win_prob*100).toFixed(1)}% <small>model estimate</small></div>
-      <div class="reason">${reasons}</div>
-    </div>`;
-  }).join("");
-  const support=data.map_support==="mode_fallback"?" · mode-level map fallback":"";
-  $("recs").innerHTML=`<div class="rec-title"><h2>Your 3 alternatives</h2><div class="latency">${data.elapsed_sec.toFixed(2)}s · ${data.simulations.toLocaleString()} simulations${support}</div></div><div class="recgrid">${cards}</div>`;
-  $("recs").querySelectorAll(".rec").forEach(el=>el.onclick=()=>{
-    S.slots[personalSlot()-1]=el.dataset.b;
-    render();
+
+  // --------------------------------------------------------
+  // BAN PHASE
+  // --------------------------------------------------------
+
+  if(data.status === "bans"){
+    html += `
+      <div class="message">
+        Enter at least 3 bans to start drafting.
+        You can enter up to 6.
+      </div>
+    `;
+  }
+
+  // --------------------------------------------------------
+  // COMPLETED DRAFT
+  // --------------------------------------------------------
+
+  if(data.status === "complete"){
+    const chance = (data.win_chance * 100).toFixed(1);
+    const opponent = (
+      data.opponent_win_chance * 100
+    ).toFixed(1);
+
+    const fallback = (
+      data.limited_data_brawlers || []
+    );
+
+    const warnings = [];
+
+    if(data.map_support === "mode_fallback"){
+      warnings.push(
+        "The map uses mode-level fallback data."
+      );
+    }
+
+    if(fallback.length){
+      warnings.push(
+        "Limited training data for: " +
+        fallback.map(title).join(", ")
+      );
+    }
+
+    html += `
+      <div class="message">
+        <h2>Draft complete</h2>
+
+        <div style="font-size:36px;font-weight:800">
+          ${chance}%
+        </div>
+
+        <div>Your team's model win estimate</div>
+
+        <div style="margin-top:12px">
+          Opponent: ${opponent}%
+        </div>
+
+        <div class="help" style="margin-top:12px">
+          ${data.confidence_note}
+        </div>
+
+        ${warnings.map(x=>`
+          <div class="help">${x}</div>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  // --------------------------------------------------------
+  // EVERY DRAFT PICK
+  // --------------------------------------------------------
+
+  if(data.status === "recommend"){
+    let heading;
+
+    if(data.kind === "personal"){
+      heading = "Your 3 recommended picks";
+    }else if(data.kind === "teammate"){
+      heading = "3 picks to suggest to your teammate";
+    }else{
+      heading = "3 predicted opponent picks";
+    }
+
+    const cards = (
+      data.recommendations || []
+    ).map((r,i)=>{
+
+      const reasons = (
+        r.reasons || []
+      ).map(x=>`<div>• ${x}</div>`).join("");
+
+      const limited =
+        r.data_support === "roster_fallback";
+
+      // Enemy-turn model estimates describe our team's
+      // perspective, so don't display them as enemy WR.
+      const metric = data.kind === "opponent"
+        ? `
+          <div class="prob">
+            ${(r.visit_fraction*100).toFixed(1)}%
+            <small>search visits</small>
+          </div>
+        `
+        : `
+          <div class="prob">
+            ${(r.estimated_win_prob*100).toFixed(1)}%
+            <small>model estimate</small>
+          </div>
+        `;
+
+      return `
+        <div class="rec ${i===0?"rank1":""}
+             ${limited?"limited":""}"
+             data-b="${r.brawler}">
+          <div class="rank">
+            #${r.rank} · click to fill
+            ${limited?" · limited data":""}
+          </div>
+
+          <div class="name">${title(r.brawler)}</div>
+
+          ${metric}
+
+          <div class="reason">${reasons}</div>
+        </div>
+      `;
+    }).join("");
+
+    const support =
+      data.map_support === "mode_fallback"
+      ? " · map fallback"
+      : "";
+
+    html += `
+      <div class="rec-title" style="margin-top:18px">
+        <h2>${heading}</h2>
+        <div class="latency">
+          ${data.elapsed_sec.toFixed(2)}s ·
+          ${data.simulations.toLocaleString()} sims
+          ${support}
+        </div>
+      </div>
+
+      <div class="recgrid">${cards}</div>
+
+      <div class="help">
+        Click a suggestion to fill the pick field.
+        Confirm the actual pick using Record pick.
+        Opponent predictions are not guaranteed.
+      </div>
+    `;
+  }
+
+  $("recs").innerHTML = html ||
+    '<div class="message">Continue the draft.</div>';
+
+  // Clicking a ban immediately adds it.
+  $("recs").querySelectorAll("[data-ban]").forEach(el=>{
+    el.onclick = ()=>{
+      if(S.bans.length >= 6)return;
+
+      const b = el.dataset.ban;
+
+      if(occupied().has(b))return;
+
+      S.bans.push(b);
+      S.lastSig = "";
+      render();
+    };
+  });
+
+  // Clicking a pick fills the field; it does NOT
+  // automatically claim an opponent picked it.
+  $("recs").querySelectorAll("[data-b]").forEach(el=>{
+    el.onclick = ()=>{
+      $("pickInput").value = el.dataset.b;
+      $("pickInput").focus();
+    };
   });
 }
+
+
 async function recommendIfNeeded(){
-  $("setupError").textContent="";
-  const cur=currentSlot();
-  if(S.bans.length<3){showMessage(`Add ${3-S.bans.length} more ban${3-S.bans.length===1?"":"s"} to start.`);return}
-  if(cur===7){showMessage("Draft complete.");return}
-  if(cur<personalSlot()){showMessage(`Record pick ${cur}. Your pick is slot ${personalSlot()}.`);return}
-  if(cur>personalSlot()){showMessage("Your pick is locked in. You can keep recording the remaining picks.");return}
-  if(S.busy){return}
-  const sig=signature();
-  if(sig===S.lastSig)return;
-  S.lastSig=sig; S.busy=true;
-  $("draftStatus").textContent="Searching future draft responses…";
-  $("recs").innerHTML='<div class="message">Calculating three picks locally…</div>';
+
+  if(!S.meta)return;
+
+  const sig = signature();
+
+  if(S.busy)return;
+  if(sig === S.lastSig)return;
+
+  S.lastSig = sig;
+  S.busy = true;
+
+  $("setupError").textContent = "";
+
+  $("recs").innerHTML =
+    '<div class="message">Calculating locally...</div>';
+
   try{
-    const r=await fetch("/api/recommend",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload())});
-    const data=await r.json();
-    if(!r.ok)throw new Error(data.error||data.detail||"Recommendation failed");
+    const response = await fetch(
+      "/api/recommend",
+      {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(payload())
+      }
+    );
+
+    const data = await response.json();
+
+    if(!response.ok){
+      throw new Error(
+        data.error || data.detail ||
+        "Recommendation failed"
+      );
+    }
+
+    // Ignore results from a draft state that has changed.
+    if(signature() !== sig)return;
+
     renderRecommendations(data);
-    $("draftStatus").textContent=data.status==="recommend"?`Your turn · pick ${personalSlot()}`:data.message;
+
+    $("draftStatus").textContent =
+      data.message || "Continue drafting.";
+
   }catch(e){
-    $("setupError").textContent=e.message;
-    showMessage("Fix the setup issue shown on the left.");
-  }finally{S.busy=false}
+
+    if(signature() === sig){
+      $("setupError").textContent = e.message;
+
+      $("recs").innerHTML =
+        '<div class="message">Calculation failed.</div>';
+    }
+
+  }finally{
+
+    S.busy = false;
+
+    // Recalculate if anything changed during the request.
+    if(signature() !== sig){
+      S.lastSig = "";
+      setTimeout(recommendIfNeeded, 0);
+    }
+  }
 }
+
+
 function render(){
-  renderBans();renderSlots();renderEntry();
-  const cur=currentSlot();
-  $("draftStatus").textContent=cur<=6?`Next: pick ${cur} · ${slotIsMine(cur)?"your team":"opponent"}`:"Draft complete";
+  renderBans();
+  renderSlots();
+  renderEntry();
+
+  const cur = currentSlot();
+
+  if(S.bans.length < 3){
+    $("draftStatus").textContent =
+      "Ban phase · choose at least 3 bans";
+
+  }else if(cur <= 6){
+    $("draftStatus").textContent =
+      `Next: pick ${cur} · ` +
+      (slotIsMine(cur) ? "your team" : "opponent");
+
+  }else{
+    $("draftStatus").textContent =
+      "Draft complete";
+  }
+
   recommendIfNeeded();
 }
+
 function addBan(){
   const b=$("banInput").value.trim().toUpperCase();
   $("setupError").textContent="";

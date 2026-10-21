@@ -1,4 +1,4 @@
-# Brawl Draft Local v1.3
+# Brawl Draft Local v1.4
 
 A Mac-local Brawl Stars Ranked draft assistant built around the MIT-licensed
 `elixf7/brawlstars-draft-agent` statistical engine.
@@ -157,3 +157,15 @@ BrawlAPI/Brawlify's public static reference endpoint.
 
 Not affiliated with, endorsed by, or sponsored by Supercell.
 Brawl Stars is a trademark of Supercell Oy.
+
+
+## v1.4 — Ban advice, full draft, final evaluation
+
+- Three empirical ban suggestions appear before picks begin.
+- Recommendations appear for every allied pick slot.
+- Three opponent-pick predictions appear on enemy turns.
+- Suggestions fill the pick field; Record pick confirms them.
+- After all six picks, the terminal model evaluates the completed draft.
+- Win estimates are currently uncalibrated.
+- Ban advice is an empirical map-strength heuristic, not ban MCTS.
+- No model retraining is required for these interface/backend features.

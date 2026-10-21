@@ -19,6 +19,7 @@ from bsdraft.fm.ffm import FFMInference
 from bsdraft.mcts.ffm_evaluator import FFMEvaluator
 from bsdraft.mcts.evaluator import FMEvaluator
 from bsdraft.mcts.recommend import recommend
+from bsdraft.mcts.state import DraftState
 
 from roster_support import augment_ffm_with_roster, load_roster_catalog
 
@@ -283,88 +284,274 @@ def candidate_reasons(
     return reasons
 
 
+
+def suggest_bans(
+    mode: str,
+    map_name: str,
+    skill_ns: float,
+    excluded: set[str],
+) -> list[dict]:
+    """
+    Fast empirical ban shortlist.
+
+    This is NOT an optimal-ban MCTS search. It ranks dangerous,
+    commonly picked brawlers using historical map/mode data.
+
+    Shrink sparse estimates toward 50% and discount generic fallbacks.
+    """
+    tier = (
+        skill_ns_to_tier(skill_ns, DB.skill_tier_boundaries)
+        if DB.skill_tier_boundaries is not None
+        else 1
+    )
+
+    results = []
+
+    for brawler in EFFECTIVE_VOCAB:
+        if brawler in excluded:
+            continue
+
+        stat = DB.brawler_lookup(
+            brawler, mode, map_name, tier
+        )
+
+        if not stat:
+            continue
+
+        n = int(stat.get("n", 0))
+        if n < 30:
+            continue
+
+        wr = float(stat.get("win_rate", 0.5))
+        pick_rate = float(stat.get("pick_rate", 0.0))
+        level = int(stat.get("level", 3))
+
+        # Reliability shrinks small samples.
+        reliability = n / (n + 250.0)
+
+        # Map-specific evidence is preferable to mode/global fallback.
+        specificity = [1.0, 0.80, 0.65, 0.40][
+            min(max(level, 0), 3)
+        ]
+
+        adjusted_wr = 0.5 + (
+            (wr - 0.5) * reliability * specificity
+        )
+
+        # Popularity matters, but cannot dominate map strength.
+        popularity_bonus = min(pick_rate, 0.10) * 0.20
+
+        score = adjusted_wr + popularity_bonus
+
+        context = (
+            "this map" if level == 0
+            else "this mode" if level <= 2
+            else "overall data"
+        )
+
+        results.append({
+            "brawler": brawler,
+            "score": round(score, 6),
+            "historical_win_rate": wr,
+            "sample_size": n,
+            "support_level": level,
+            "reason": (
+                f"{wr:.0%} historical win rate in {context} "
+                f"({n:,} observations)"
+            ),
+            "data_support": (
+                "roster_fallback"
+                if brawler in APPROXIMATE_BRAWLERS
+                else "trained"
+            ),
+        })
+
+    results.sort(
+        key=lambda x: (-x["score"], x["brawler"])
+    )
+
+    return results[:3]
+
+
 def make_recommendation(payload: dict) -> dict:
     mode = str(payload.get("mode", "")).strip()
     map_name = str(payload.get("map", "")).strip()
+
     personal_slot = int(payload.get("personal_slot", 0))
-    skill_percentile = float(payload.get("skill_percentile", 75))
-    n_simulations = int(payload.get("n_simulations", 20000))
+    skill_percentile = float(
+        payload.get("skill_percentile", 75)
+    )
+    n_simulations = int(
+        payload.get("n_simulations", 20000)
+    )
 
     if personal_slot not in range(1, 7):
-        raise ValueError("personal_slot must be from 1 to 6.")
+        raise ValueError("Invalid personal pick slot.")
 
     valid_budgets = {5000, 10000, 20000, 40000, 80000}
     if n_simulations not in valid_budgets:
-        raise ValueError(f"n_simulations must be one of {sorted(valid_budgets)}.")
+        raise ValueError("Invalid simulation budget.")
 
     if mode not in MAP_MODES:
-        raise ValueError("Unknown game mode.")
+        raise ValueError("Unknown mode.")
+
     if map_name not in MAP_MODES[mode]:
-        raise ValueError("That map does not match the selected mode.")
-    if not isinstance(TRAINED, FFMInference) and map_name not in NATIVE_MODEL_MAPS:
+        raise ValueError("Map does not match selected mode.")
+
+    if (
+        not isinstance(TRAINED, FFMInference)
+        and map_name not in NATIVE_MODEL_MAPS
+    ):
         raise ValueError(
-            "This map is newer than the installed model. Run setup.command to update the engine."
+            "Map not supported by installed model."
         )
 
     bans_raw = payload.get("bans", [])
+
     if not isinstance(bans_raw, list):
-        raise ValueError("bans must be a list.")
-    bans = [clean_brawler(x) for x in bans_raw if clean_brawler(x)]
-    if not 3 <= len(bans) <= 6:
-        raise ValueError("Enter between 3 and 6 bans.")
+        raise ValueError("Bans must be a list.")
+
+    bans = [
+        clean_brawler(b)
+        for b in bans_raw
+        if clean_brawler(b)
+    ]
+
+    if len(bans) > 6:
+        raise ValueError("Maximum 6 bans.")
+
     if len(set(bans)) != len(bans):
-        raise ValueError("A brawler is banned more than once.")
+        raise ValueError("Duplicate bans.")
 
     slots = parse_slots(payload.get("slots"))
     next_slot = validate_sequential(slots)
-    used = [x for x in slots if x]
-    if len(set(used)) != len(used):
-        raise ValueError("A brawler is picked more than once.")
-    overlap = set(used) & set(bans)
-    if overlap:
-        raise ValueError(f"Picked brawler is banned: {', '.join(sorted(overlap))}")
 
-    vocab = set(EFFECTIVE_VOCAB)
-    unknown = (set(used) | set(bans)) - vocab
+    used = [b for b in slots if b]
+
+    if len(set(used)) != len(used):
+        raise ValueError("Duplicate picks.")
+
+    if set(used) & set(bans):
+        raise ValueError("A picked brawler is banned.")
+
+    unknown = (set(used) | set(bans)) - set(EFFECTIVE_VOCAB)
+
     if unknown:
-        raise ValueError(f"Unknown brawler(s): {', '.join(sorted(unknown))}")
+        raise ValueError(
+            f"Unknown brawler(s): {', '.join(sorted(unknown))}"
+        )
+
+    if used and len(bans) < 3:
+        raise ValueError(
+            "Enter at least 3 bans before drafting."
+        )
+
+    skill_ns = pct_to_skill(skill_percentile)
+
+    # Ban advice remains available until picks actually start.
+    ban_recommendations = (
+        suggest_bans(
+            mode,
+            map_name,
+            skill_ns,
+            set(bans) | set(used),
+        )
+        if not used and len(bans) < 6
+        else []
+    )
+
+    # ------------------------------------------------------
+    # BAN PHASE
+    # ------------------------------------------------------
+
+    if len(bans) < 3:
+        return {
+            "status": "bans",
+            "message": "Ban phase — select at least 3 bans.",
+            "next_slot": 1,
+            "ban_recommendations": ban_recommendations,
+            "recommendations": [],
+        }
+
+    my_picks, opp_picks, is_first_pick = team_lists(
+        slots, personal_slot
+    )
+
+    # ------------------------------------------------------
+    # COMPLETED DRAFT
+    # ------------------------------------------------------
 
     if next_slot == 7:
+        terminal = DraftState(
+            my_team=frozenset(my_picks),
+            opp_team=frozenset(opp_picks),
+            mode=mode,
+            map_name=map_name,
+            skill_ns=skill_ns,
+            is_first_pick=is_first_pick,
+            bans=frozenset(bans),
+        )
+
+        with SEARCH_LOCK:
+            probability = float(EVALUATOR.evaluate(terminal))
+
+        probability = max(
+            0.0, min(1.0, probability)
+        )
+
+        fallback_brawlers = sorted(
+            set(used) & APPROXIMATE_BRAWLERS
+        )
+
         return {
             "status": "complete",
             "message": "Draft complete.",
             "next_slot": None,
             "recommendations": [],
+            "ban_recommendations": [],
+            "win_chance": probability,
+            "opponent_win_chance": 1.0 - probability,
+            "confidence_note": (
+                "Uncalibrated trained-model estimate, "
+                "not a validated prediction of actual outcomes."
+            ),
+            "limited_data_brawlers": fallback_brawlers,
+            "map_support": (
+                "mode_fallback"
+                if map_name in APPROXIMATE_MAPS
+                else "map_specific"
+            ),
         }
 
-    if next_slot != personal_slot:
-        relation = "before" if next_slot < personal_slot else "after"
-        if relation == "before":
-            return {
-                "status": "waiting",
-                "message": f"Enter pick {next_slot}. Your pick is slot {personal_slot}.",
-                "next_slot": next_slot,
-                "recommendations": [],
-            }
-        return {
-            "status": "picked",
-            "message": "Your pick has already been entered. You can continue recording the draft.",
-            "next_slot": next_slot,
-            "recommendations": [],
-        }
+    # ------------------------------------------------------
+    # ALL PICK TURNS
+    # ------------------------------------------------------
 
-    my_picks, opp_picks, is_first_pick = team_lists(slots, personal_slot)
-    skill_ns = pct_to_skill(skill_percentile)
+    # The MCTS engine already handles 'mine' and 'opp'
+    # internally. Do not skip teammate or opponent turns.
 
-    # Make identical draft states reproducible.
-    # n_simulations is intentionally excluded so larger searches extend
-    # the same initial random sequence.
+    is_allied_turn = (
+        next_slot in FIRST_TEAM_SLOTS
+        if is_first_pick
+        else next_slot in SECOND_TEAM_SLOTS
+    )
+
+    if is_allied_turn:
+        kind = (
+            "personal"
+            if next_slot == personal_slot
+            else "teammate"
+        )
+    else:
+        kind = "opponent"
+
     seed_material = json.dumps(
         {
             "mode": mode,
             "map": map_name,
+            "slot": next_slot,
             "personal_slot": personal_slot,
-            "skill_percentile": skill_percentile,
+            "skill": skill_percentile,
             "bans": sorted(bans),
             "slots": slots,
         },
@@ -373,7 +560,10 @@ def make_recommendation(payload: dict) -> dict:
     ).encode("utf-8")
 
     search_seed = int.from_bytes(
-        hashlib.blake2b(seed_material, digest_size=8).digest(),
+        hashlib.blake2b(
+            seed_material,
+            digest_size=8
+        ).digest(),
         "little",
     )
 
@@ -394,43 +584,79 @@ def make_recommendation(payload: dict) -> dict:
             rng=np.random.default_rng(search_seed),
         )
 
-    recs = []
-    for rank, pick in enumerate(result.top_picks[:3], start=1):
-        b = pick["brawler"]
-        recs.append(
-            {
-                "rank": rank,
-                "brawler": b,
-                "estimated_win_prob": float(pick.get("estimated_win_prob", 0.0)),
-                "win_prob_delta": float(pick.get("win_prob_delta", 0.0)),
-                "visit_fraction": float(pick.get("visit_fraction", 0.0)),
-                "relative_visit_fraction": float(
-                    pick.get("relative_visit_fraction", 0.0)
-                ),
-                "data_support": (
-                    "roster_fallback" if b in APPROXIMATE_BRAWLERS else "trained"
-                ),
-                "reasons": candidate_reasons(
-                    b, my_picks, opp_picks, mode, map_name, skill_ns, pick
-                ),
-            }
+    expected_turn = (
+        "mine" if is_allied_turn else "opp"
+    )
+
+    if result.whose_turn != expected_turn:
+        raise RuntimeError(
+            "Draft-side mismatch between app and engine."
         )
+
+    recommendations = []
+
+    for rank, pick in enumerate(
+        result.top_picks[:3], start=1
+    ):
+        brawler = pick["brawler"]
+
+        # Explanation perspective must follow the candidate's team.
+        if is_allied_turn:
+            same_side = my_picks
+            other_side = opp_picks
+        else:
+            same_side = opp_picks
+            other_side = my_picks
+
+        recommendations.append({
+            "rank": rank,
+            "brawler": brawler,
+            "estimated_win_prob": float(
+                pick.get("estimated_win_prob", 0.0)
+            ),
+            "visit_fraction": float(
+                pick.get("visit_fraction", 0.0)
+            ),
+            "data_support": (
+                "roster_fallback"
+                if brawler in APPROXIMATE_BRAWLERS
+                else "trained"
+            ),
+            "reasons": candidate_reasons(
+                brawler,
+                same_side,
+                other_side,
+                mode,
+                map_name,
+                skill_ns,
+                pick,
+            ),
+        })
+
+    labels = {
+        "personal": "Your pick",
+        "teammate": "Teammate pick",
+        "opponent": "Opponent prediction",
+    }
 
     return {
         "status": "recommend",
-        "message": f"Your turn — pick {personal_slot}.",
+        "kind": kind,
+        "message": f"{labels[kind]} — slot {next_slot}.",
         "next_slot": next_slot,
-        "recommendations": recs,
+        "recommendations": recommendations,
+        "ban_recommendations": ban_recommendations,
         "elapsed_sec": float(result.elapsed_sec),
         "simulations": n_simulations,
-        "dataset_rows": STATE.get("dataset_rows"),
-        "map_support": "mode_fallback" if map_name in APPROXIMATE_MAPS else "map_specific",
-        "roster_fallback_count": len(APPROXIMATE_BRAWLERS),
+        "map_support": (
+            "mode_fallback"
+            if map_name in APPROXIMATE_MAPS
+            else "map_specific"
+        ),
     }
 
-
 class Handler(BaseHTTPRequestHandler):
-    server_version = "BrawlDraftLocal/1.3"
+    server_version = "BrawlDraftLocal/1.4"
 
     def log_message(self, fmt: str, *args) -> None:
         print("[local]", fmt % args)
